@@ -5,11 +5,13 @@ const knex = require('knex')(knexConfig);
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-// Helpers
+// -----------------------
+// Função para registrar usuário automaticamente
+// -----------------------
 async function ensureUser(ctx) {
     const t = ctx.from;
-    const exists = await knex('users').where({ id: t.id }).first();
-    if (!exists) {
+    const user = await knex('users').where({ id: t.id }).first();
+    if (!user) {
         await knex('users').insert({
             id: t.id,
             username: t.username || null,
@@ -19,141 +21,247 @@ async function ensureUser(ctx) {
     }
 }
 
-// /start
+// -----------------------
+// /start — mensagem inicial
+// -----------------------
 bot.start(async (ctx) => {
     await ensureUser(ctx);
+
     return ctx.reply(
-        `Fala, ${ctx.from.first_name}! Bot de treino pronto.\nComandos:\n/newroutine <nome>\n/listroutines\n/addroutineexercise <routine_id>|<nome>|<equipment>|<default_reps>\n/startroutine <routine_id>\n/logset <session_id>|<exercise_id>|<weight>|<reps>\n/finishsession <session_id>\n/session <session_id>\n/myhistory [limit]`
+        `Fala, ${ctx.from.first_name}! Bora treinar.\n\n` +
+        `Comandos disponíveis:\n` +
+        `• /newroutine <nome> — Criar rotina\n` +
+        `• /listroutines — Listar rotinas\n` +
+        `• /addroutineexercise <routine_id>|<nome>|<equipamento>|<reps>\n` +
+        `• /startroutine <routine_id> — Iniciar treino\n` +
+        `• /logset <session_id>|<exercise_id>|<peso>|<reps>|[duração]\n` +
+        `• /finishsession <session_id> — Finalizar treino\n` +
+        `• /session <session_id> — Ver detalhes da sessão\n` +
+        `• /myhistory [n] — Histórico\n`
     );
 });
 
-// /newroutine Nome da rotina
+// -----------------------
+// Criar rotina
+// -----------------------
 bot.command('newroutine', async (ctx) => {
     await ensureUser(ctx);
-    const text = ctx.message.text.replace('/newroutine', '').trim();
-    if (!text) return ctx.reply('Use: /newroutine <nome da rotina>');
+
+    const nome = ctx.message.text.replace('/newroutine', '').trim();
+    if (!nome) return ctx.reply('Use: /newroutine <nome da rotina>');
+
     const [id] = await knex('routines').insert({
         user_id: ctx.from.id,
-        name: text
+        name: nome
     });
-    ctx.reply(`Rotina criada: ${text} (id: ${id})`);
+
+    ctx.reply(`Rotina criada com sucesso!\n• Nome: ${nome}\n• ID: ${id}`);
 });
 
-// /listroutines
+// -----------------------
+// Listar rotinas
+// -----------------------
 bot.command('listroutines', async (ctx) => {
     await ensureUser(ctx);
-    const rows = await knex('routines').where({ user_id: ctx.from.id }).orderBy('id', 'desc');
-    if (!rows.length) return ctx.reply('Nenhuma rotina encontrada. Crie com /newroutine <nome>');
-    let out = 'Suas rotinas:\n';
-    rows.forEach(r => out += `ID ${r.id} — ${r.name}\n`);
-    ctx.reply(out);
+
+    const rotinas = await knex('routines')
+        .where({ user_id: ctx.from.id })
+        .orderBy('id', 'desc');
+
+    if (!rotinas.length)
+        return ctx.reply('Você ainda não criou rotinas. Use /newroutine.');
+
+    let texto = 'Suas rotinas:\n';
+    rotinas.forEach(r => {
+        texto += `• ID ${r.id} — ${r.name}\n`;
+    });
+
+    ctx.reply(texto);
 });
 
-// /addroutineexercise <routine_id>|<nome>|<equipment>|<default_reps>
+// -----------------------
+// Adicionar exercício na rotina
+// -----------------------
 bot.command('addroutineexercise', async (ctx) => {
     await ensureUser(ctx);
-    const payload = ctx.message.text.replace('/addroutineexercise', '').trim();
-    const parts = payload.split('|').map(s => s.trim());
-    if (parts.length < 2) return ctx.reply('Use: /addroutineexercise <routine_id>|<nome>|<equipment>|<default_reps>');
-    const [routine_id, name, equipment = null, default_reps = null] = parts;
-    const exId = await knex('exercises').insert({
+
+    const args = ctx.message.text.replace('/addroutineexercise', '').trim();
+    const parts = args.split('|').map(s => s.trim());
+
+    if (parts.length < 2)
+        return ctx.reply('Use: /addroutineexercise <routine_id>|<nome>|<equipamento>|<reps padrão>');
+
+    const [routine_id, nome, equipamento = null, reps = null] = parts;
+
+    const [exerciseId] = await knex('exercises').insert({
         user_id: ctx.from.id,
-        name,
-        equipment,
-        default_reps
+        name: nome,
+        equipment: equipamento,
+        default_reps: reps
     });
+
     await knex('routine_exercises').insert({
-        routine_id: routine_id,
-        exercise_id: exId[0]
+        routine_id,
+        exercise_id: exerciseId
     });
-    ctx.reply(`Exercício "${name}" adicionado à rotina ${routine_id} (exercise_id: ${exId[0]})`);
+
+    ctx.reply(
+        `Exercício adicionado à rotina ${routine_id}:\n` +
+        `• Nome: ${nome}\n` +
+        `• Equipamento: ${equipamento || '-'}\n` +
+        `• Reps padrão: ${reps || '-'}\n` +
+        `• ID do exercício: ${exerciseId}`
+    );
 });
 
-// /startroutine <routine_id>
+// -----------------------
+// Iniciar sessão
+// -----------------------
 bot.command('startroutine', async (ctx) => {
     await ensureUser(ctx);
-    const arg = ctx.message.text.replace('/startroutine', '').trim();
-    if (!arg) return ctx.reply('Use: /startroutine <routine_id>');
+
+    const routineId = ctx.message.text.replace('/startroutine', '').trim();
+    if (!routineId) return ctx.reply('Use: /startroutine <routine_id>');
+
     const [sessionId] = await knex('sessions').insert({
-        routine_id: arg,
+        routine_id: routineId,
         user_id: ctx.from.id
     });
-    ctx.reply(`Sessão iniciada. session_id: ${sessionId}`);
+
+    ctx.reply(`Sessão iniciada!\nID da sessão: ${sessionId}`);
 });
 
-// /logset <session_id>|<exercise_id>|<weight>|<reps>|[duration_seconds]
+// -----------------------
+// Registrar série
+// -----------------------
 bot.command('logset', async (ctx) => {
     await ensureUser(ctx);
-    const payload = ctx.message.text.replace('/logset', '').trim();
-    const parts = payload.split('|').map(s => s.trim());
-    if (parts.length < 4) return ctx.reply('Use: /logset <session_id>|<exercise_id>|<weight>|<reps>|[duration_seconds]');
-    const [session_id, exercise_id, weight, reps, duration] = parts;
-    // compute set_index
-    const setsCount = await knex('sets').where({ session_id }).count('id as cnt').first();
-    const set_index = (setsCount.cnt || 0) + 1;
+
+    const raw = ctx.message.text.replace('/logset', '').trim();
+    const parts = raw.split('|').map(s => s.trim());
+
+    if (parts.length < 4)
+        return ctx.reply('Use: /logset <session_id>|<exercise_id>|<peso>|<reps>|[duração]');
+
+    const [session_id, exercise_id, peso, reps, duracao] = parts;
+
+    const count = await knex('sets')
+        .where({ session_id })
+        .count('id as c')
+        .first();
+
+    const set_index = Number(count.c || 0) + 1;
+
     await knex('sets').insert({
         session_id,
         exercise_id,
         set_index,
-        weight: weight || null,
+        weight: peso || null,
         reps: reps || null,
-        duration_seconds: duration || null
+        duration_seconds: duracao || null
     });
-    ctx.reply(`Set registrado: session ${session_id}, exercise ${exercise_id}, ${weight} x ${reps}`);
+
+    ctx.reply(
+        `Série registrada!\n` +
+        `• Sessão: ${session_id}\n` +
+        `• Exercício: ${exercise_id}\n` +
+        `• Peso: ${peso}\n` +
+        `• Reps: ${reps}\n` +
+        `${duracao ? `• Duração: ${duracao}s\n` : ''}`
+    );
 });
 
-// /finishsession <session_id>
+// -----------------------
+// Finalizar sessão
+// -----------------------
 bot.command('finishsession', async (ctx) => {
     await ensureUser(ctx);
-    const arg = ctx.message.text.replace('/finishsession', '').trim();
-    if (!arg) return ctx.reply('Use: /finishsession <session_id>');
-    await knex('sessions').where({ id: arg, user_id: ctx.from.id }).update({ finished_at: knex.fn.now() });
-    ctx.reply(`Sessão ${arg} finalizada.`);
+
+    const id = ctx.message.text.replace('/finishsession', '').trim();
+    if (!id) return ctx.reply('Use: /finishsession <session_id>');
+
+    await knex('sessions')
+        .where({ id, user_id: ctx.from.id })
+        .update({ finished_at: knex.fn.now() });
+
+    ctx.reply(`Sessão ${id} finalizada!`);
 });
 
-// /session <session_id> -> mostra resumo
+// -----------------------
+// Detalhes da sessão
+// -----------------------
 bot.command('session', async (ctx) => {
     await ensureUser(ctx);
-    const arg = ctx.message.text.replace('/session', '').trim();
-    if (!arg) return ctx.reply('Use: /session <session_id>');
-    const session = await knex('sessions').where({ id: arg, user_id: ctx.from.id }).first();
-    if (!session) return ctx.reply('Sessão não encontrada');
+
+    const id = ctx.message.text.replace('/session', '').trim();
+    if (!id) return ctx.reply('Use: /session <session_id>');
+
+    const session = await knex('sessions')
+        .where({ id, user_id: ctx.from.id })
+        .first();
+
+    if (!session)
+        return ctx.reply('Sessão não encontrada.');
+
     const sets = await knex('sets')
         .join('exercises', 'sets.exercise_id', 'exercises.id')
-        .select('sets.*', 'exercises.name as exercise_name')
-        .where({ session_id: arg })
+        .select('sets.*', 'exercises.name as ex_nome')
+        .where({ session_id: id })
         .orderBy(['exercise_id', 'set_index']);
-    let out = `Sessão ${arg} — início: ${session.started_at}\n\n`;
-    const byExercise = {};
+
+    let out = `Sessão ${id}\nInício: ${session.started_at}\n\n`;
+    const agrupado = {};
+
     sets.forEach(s => {
-        byExercise[s.exercise_name] = byExercise[s.exercise_name] || [];
-        byExercise[s.exercise_name].push(`S${s.set_index}: ${s.weight || '-'} × ${s.reps || '-'} ${s.duration_seconds ? '(' + s.duration_seconds + 's)' : ''}`);
+        agrupado[s.ex_nome] = agrupado[s.ex_nome] || [];
+        agrupado[s.ex_nome].push(
+            `S${s.set_index}: ${s.weight || '-'}kg × ${s.reps || '-'} ${s.duration_seconds ? `(${s.duration_seconds}s)` : ''}`
+        );
     });
-    for (const ex of Object.keys(byExercise)) {
-        out += `* ${ex}\n  ${byExercise[ex].join(' | ')}\n`;
+
+    for (const key of Object.keys(agrupado)) {
+        out += `• ${key}\n   ${agrupado[key].join(' | ')}\n`;
     }
+
     ctx.reply(out);
 });
 
-// /myhistory [limit]
+// -----------------------
+// Histórico
+// -----------------------
 bot.command('myhistory', async (ctx) => {
     await ensureUser(ctx);
-    const arg = ctx.message.text.replace('/myhistory', '').trim();
-    const limit = parseInt(arg) || 10;
-    const rows = await knex('sessions').where({ user_id: ctx.from.id }).orderBy('started_at', 'desc').limit(limit);
-    if (!rows.length) return ctx.reply('Nenhuma sessão encontrada.');
-    let out = 'Últimas sessões:\n';
-    for (const s of rows) {
-        out += `ID ${s.id} — inicio: ${s.started_at} — final: ${s.finished_at || '-'}\n`;
-    }
-    ctx.reply(out);
+
+    const limit = parseInt(ctx.message.text.replace('/myhistory', '').trim()) || 10;
+
+    const sessions = await knex('sessions')
+        .where({ user_id: ctx.from.id })
+        .orderBy('started_at', 'desc')
+        .limit(limit);
+
+    if (!sessions.length)
+        return ctx.reply('Você ainda não registrou sessões.');
+
+    let msg = `Últimas ${sessions.length} sessões:\n\n`;
+
+    sessions.forEach(s => {
+        msg += `• ID ${s.id} — início: ${s.started_at} — fim: ${s.finished_at || '-'}\n`;
+    });
+
+    ctx.reply(msg);
 });
 
-// fallback
+// -----------------------
+// Fallback
+// -----------------------
 bot.on('text', (ctx) => {
-    return ctx.reply('Comando não reconhecido. Use /start para ver a lista de comandos.');
+    return ctx.reply('Comando não reconhecido. Use /start para ver os comandos.');
 });
 
-bot.launch().then(() => console.log('Bot rodando'));
+// -----------------------
+// Inicialização
+// -----------------------
+bot.launch().then(() => console.log('Bot rodando 🚀'));
+
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
