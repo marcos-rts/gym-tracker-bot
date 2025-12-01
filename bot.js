@@ -287,6 +287,105 @@ bot.command('myhistory', async (ctx) => {
 
     ctx.reply(out);
 });
+// -------------------------------------------
+// /routinedetails <routine_id>
+// -------------------------------------------
+bot.command("routinedetails", async (ctx) => {
+    await ensureUser(ctx);
+
+    const arg = ctx.message.text.replace('/routinedetails', '').trim();
+    if (!arg) return ctx.reply("Use: /routinedetails <routine_id>");
+
+    const routineId = Number(arg);
+
+    // Buscar rotina
+    const routine = await knex("routines")
+        .where({ id: routineId, user_id: ctx.from.id })
+        .first();
+
+    if (!routine) {
+        return ctx.reply("Rotina não encontrada.");
+    }
+
+    // Buscar exercícios da rotina
+    const exercises = await knex("routine_exercises AS re")
+        .join("exercises AS e", "e.id", "re.exercise_id")
+        .select("e.id as exercise_id", "e.name as exercise_name", "e.equipment", "e.default_reps")
+        .where("re.routine_id", routineId);
+
+    // Buscar última sessão dessa rotina
+    const lastSession = await knex("sessions")
+        .where({ routine_id: routineId, user_id: ctx.from.id })
+        .orderBy("started_at", "desc")
+        .first();
+
+    let lastSessionText = "Nenhuma execução registrada ainda.";
+
+    if (lastSession) {
+        // Buscar sets dessa sessão
+        const sets = await knex("sets AS s")
+            .join("exercises AS e", "e.id", "s.exercise_id")
+            .select(
+                "s.*",
+                "e.name as exercise_name"
+            )
+            .where("s.session_id", lastSession.id)
+            .orderBy(["exercise_id", "set_index"]);
+
+        let formatted = "";
+        let currentEx = "";
+
+        sets.forEach(set => {
+            if (currentEx !== set.exercise_name) {
+                currentEx = set.exercise_name;
+                formatted += `\n  ${set.exercise_name}\n`;
+            }
+
+            formatted += `   S${set.set_index}: ${set.weight || '-'}kg × ${set.reps || '-'}`
+            if (set.duration_seconds) {
+                formatted += ` (${set.duration_seconds}s)`;
+            }
+            formatted += `\n`;
+        });
+
+        lastSessionText = `
+Sessão: ${lastSession.id}
+Data: ${lastSession.started_at}
+
+${formatted}
+        `;
+    }
+
+    // Montar NOTINHA
+    let out = `
+=============================
+       ROTINA #${routineId}
+   ${routine.name}
+=============================
+
+Criada em: ${routine.created_at}
+
+Exercícios:
+`;
+
+    exercises.forEach(ex => {
+        out += `
+- ${ex.exercise_name} (${ex.equipment || "livre"})
+  • Repetições padrão: ${ex.default_reps || "-"}
+`;
+    });
+
+    out += `
+=============================
+ Última execução
+=============================
+${lastSessionText}
+=============================
+`;
+
+    return ctx.reply("```\n" + out + "\n```", { parse_mode: "Markdown" });
+});
+
 
 // -------------------------------------------
 // Fallback
