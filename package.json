@@ -1,0 +1,14 @@
+{
+  "name": "gym-tracker-bot",
+  "version": "1.0.0",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "dependencies": {
+    "telegraf": "^4.14.0",
+    "knex": "^2.5.0",
+    "mysql2": "^3.2.0",
+    "dotenv": "^16.0.0"
+  }
+}
