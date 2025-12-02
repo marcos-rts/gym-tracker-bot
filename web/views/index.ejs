@@ -1,0 +1,25 @@
+<%- include("layout") %>
+
+<h2>Dashboard</h2>
+
+<div class="row mt-4">
+
+  <div class="col-md-4">
+    <div class="card bg-secondary p-3">
+      <h3>Users: <%= stats.users %></h3>
+    </div>
+  </div>
+
+  <div class="col-md-4">
+    <div class="card bg-secondary p-3">
+      <h3>Routines: <%= stats.routines %></h3>
+    </div>
+  </div>
+
+  <div class="col-md-4">
+    <div class="card bg-secondary p-3">
+      <h3>Sessions: <%= stats.sessions %></h3>
+    </div>
+  </div>
+
+</div>
